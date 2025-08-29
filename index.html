@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Vocabulary Crammer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="views">
+        <!-- Upload screen -->
+        <section id="view-upload" class="view active">
+          <button id="openSettings" class="gear" aria-label="Настройки">⚙️</button>
+          <div class="card enter">
+            <div class="home-title">Импорт словаря</div>
+            <div class="home-sub">Загрузите CSV (две колонки)</div>
+            <div class="home-controls">
+              <label class="file-label">
+                <input type="file" id="csvFile" accept=".csv" />
+                <span class="file-btn">Выбрать CSV</span>
+              </label>
+              <button id="loadSample" class="ghost">Загрузить пример</button>
+            </div>
+            <div class="dataset-summary muted" id="datasetSummary">—</div>
+            <div id="status" class="status">Загрузите CSV, чтобы продолжить.</div>
+            <div class="home-actions">
+              <button id="toModes" class="primary" disabled>Далее</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Modes screen -->
+        <section id="view-modes" class="view">
+          <button id="backUpload" class="back-btn">← Назад</button>
+          <button id="openSettings2" class="gear" aria-label="Настройки">⚙️</button>
+          <div class="card enter">
+            <div class="home-title">Выбор режима</div>
+            <div class="home-sub">Выберите, как хотите учить</div>
+
+            <div class="tiles" id="modeTiles">
+              <button class="tile selected" data-mode="flashcards">
+                <svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="6" width="14" height="10" rx="2"></rect>
+                  <rect x="7" y="4" width="14" height="10" rx="2"></rect>
+                </svg>
+                <div class="tile-title">Карточки</div>
+                <div class="tile-sub">Переворачивайте карточки, свайпы</div>
+              </button>
+              <button class="tile" data-mode="choice">
+                <svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="4 12 9 17 20 6"/>
+                </svg>
+                <div class="tile-title">Выбор</div>
+                <div class="tile-sub">Один правильный из четырёх</div>
+              </button>
+              <button class="tile" data-mode="typing">
+                <svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="6" width="18" height="12" rx="2"/>
+                  <path d="M6 10h2M10 10h2M14 10h2M18 10h0M6 14h6"/>
+                </svg>
+                <div class="tile-title">Ввод</div>
+                <div class="tile-sub">Пишите перевод вручную</div>
+              </button>
+              <button class="tile" data-mode="matching">
+                <svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="8" height="6" rx="1.5"/>
+                  <rect x="13" y="14" width="8" height="6" rx="1.5"/>
+                  <path d="M7 10l10 4"/>
+                </svg>
+                <div class="tile-title">Сопоставление</div>
+                <div class="tile-sub">Найдите пары A↔B</div>
+              </button>
+              <button class="tile" data-mode="blitz">
+                <svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <path d="M12 7v5l3 3"/>
+                </svg>
+                <div class="tile-title">Блиц</div>
+                <div class="tile-sub">Быстрые ответы по таймеру</div>
+              </button>
+            </div>
+
+            <div class="home-sub" style="margin-top:10px">Направление</div>
+            <div class="tiles two" id="dirTiles">
+              <button class="tile selected" data-dir="ab">
+                <svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h13"/><polyline points="13 5 20 12 13 19"/></svg>
+                <div class="tile-title" id="tileAB">A → B</div>
+              </button>
+              <button class="tile" data-dir="ba">
+                <svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H7"/><polyline points="11 5 4 12 11 19"/></svg>
+                <div class="tile-title" id="tileBA">B → A</div>
+              </button>
+            </div>
+
+            <div class="stack" style="margin-top:10px">
+              <div class="home-row">
+                <label class="switch"><input type="checkbox" id="includeLearned" /><span>Включать выученные</span></label>
+                <label class="switch"><input type="checkbox" id="onlyUnlearned" /><span>Только невыученные</span></label>
+                <button id="fillRemainingBtn" class="ghost" type="button">Все оставшиеся</button>
+              </div>
+              <label>Размер сессии: <span id="sizeVal">30</span></label>
+              <input type="range" id="sizeRange" min="5" max="200" value="30" />
+            </div>
+
+            <div class="home-actions">
+              <button id="startStudy" class="primary">Начать</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Study screen -->
+        <section id="view-study" class="view">
+          <div class="study-top">
+            <button id="backModes" class="back-btn">← Режимы</button>
+          </div>
+          <div id="studyApp" class="app"></div>
+          <div class="progress"><div id="progressBar" class="bar"></div></div>
+          <div class="study-footer"><div id="studyStatsBottom" class="muted">—</div></div>
+        </section>
+      </main>
+
+      <!-- Settings bottom sheet -->
+      <div id="settingsBackdrop" class="sheet-backdrop hidden"></div>
+      <div id="settingsSheet" class="sheet hidden" role="dialog" aria-modal="true">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">Настройки</div>
+          <div class="sheet-content">
+            <div class="stack">
+              <label>Тема</label>
+              <div class="seg" id="themeSeg">
+                <label><input type="radio" name="theme" value="pastel" checked /><span>Светлая</span></label>
+                <label><input type="radio" name="theme" value="neon" /><span>Неон</span></label>
+                <label><input type="radio" name="theme" value="indigo" /><span>Индиго</span></label>
+              </div>
+            </div>
+            <div class="stack-row">
+              <label class="switch"><input type="checkbox" id="hasHeader" checked /><span>Первая строка — заголовки</span></label>
+            </div>
+            <div class="stack-row">
+              <label class="switch"><input type="checkbox" id="shuffleOrder" checked /><span>Перемешивать порядок слов</span></label>
+            </div>
+            <div class="home-row">
+              <div class="stack small"><label for="streakToLearn">Правильных подряд</label><input type="number" id="streakToLearn" min="1" max="10" step="1" value="2" /></div>
+            </div>
+            <div class="home-row">
+              <div class="stack"><label for="langA">Язык A</label><input type="text" id="langA" placeholder="Колонка 1" /></div>
+              <div class="stack"><label for="langB">Язык B</label><input type="text" id="langB" placeholder="Колонка 2" /></div>
+            </div>
+          <div class="stack-row">
+            <label class="switch"><input type="checkbox" id="showOnDontKnow" checked /><span>Показывать ответ при «Не знаю»</span></label>
+          </div>
+          <div class="home-row">
+            <div class="stack small"><label for="showDelay">Задержка (мс)</label><input type="number" id="showDelay" min="500" max="5000" step="100" value="2000" /></div>
+          </div>
+          <div class="home-actions">
+            <button id="resetProgress" class="ghost">Сбросить прогресс набора</button>
+          </div>
+        </div>
+        <div class="sheet-actions">
+          <button id="settingsClose" class="primary">Готово</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+  </html>
