@@ -26,6 +26,9 @@ const state = {
   // Flashcards queue-based practice
   flashQueue: [], // list of indices to master (in order)
   flashTotal: 0,
+  // Batch learning system
+  batchSize: 20, // размер порции для изучения
+  batchMode: true, // включен ли режим порций
 };
 
 // Progress store (per CSV dataset)
@@ -37,7 +40,21 @@ function loadStore() {
 function saveStore(store) { localStorage.setItem(storeKey, JSON.stringify(store)); }
 function getDatasetStore(id) {
   const store = loadStore();
-  if (!store.datasets[id]) store.datasets[id] = { progress: {}, stats: { answered: 0, correct: 0 }, meta: {}, learned: {}, streaks: {} };
+  if (!store.datasets[id]) {
+    store.datasets[id] = {
+      progress: {},
+      stats: { answered: 0, correct: 0 },
+      meta: {},
+      learned: {},
+      streaks: {},
+      // Batch learning
+      currentBatch: 0, // текущая активная порция (0 = первые 20 слов)
+      unlockedBatches: 1, // количество разблокированных порций
+    };
+  }
+  // Backwards compatibility - добавляем поля, если их нет
+  if (store.datasets[id].currentBatch === undefined) store.datasets[id].currentBatch = 0;
+  if (store.datasets[id].unlockedBatches === undefined) store.datasets[id].unlockedBatches = 1;
   return store;
 }
 function updateDatasetMeta(id, meta) {
@@ -158,11 +175,7 @@ function render() {
   if (state.mode === 'flashcards') renderFlashcards(ask, ans, idx);
   else if (state.mode === 'choice') renderChoice(ask, ans, idx);
   else if (state.mode === 'typing') renderTyping(ask, ans, idx);
-  else if (state.mode === 'matching') renderMatching();
-  else if (state.mode === 'blitz') renderBlitz(ask, ans, idx);
   else if (state.mode === 'listening') renderListening(ask, ans, idx);
-  else if (state.mode === 'reverse') renderReverse(ask, ans, idx);
-  else if (state.mode === 'mixed') renderMixed(ask, ans, idx);
 }
 
 function nextCard(correct) {
@@ -186,6 +199,12 @@ function nextCard(correct) {
       ds.learned = ds.learned || {};
       ds.learned[key] = true;
       saveStore(storeRef);
+      // Проверяем, можно ли разблокировать следующую порцию
+      const unlocked = checkAndUnlockNextBatch();
+      if (unlocked) {
+        // Показываем уведомление о разблокировке
+        showBatchUnlockNotification();
+      }
     } else {
       // requeue for further practice
       state.flashQueue.push(current);
@@ -417,127 +436,7 @@ function renderTyping(question, answer, idxKey) {
   input.focus();
 }
 
-// Matching pairs — builds a round of N pairs (default up to 6)
-function renderMatching() {
-  const root = $('#studyApp');
-  const remaining = state.session.length - state.i;
-  if (remaining <= 0) { nextCard(true); return; }
-  const round = Math.min(6, remaining);
-  const indices = state.session.slice(state.i, state.i + round);
-  const cards = [];
-  indices.forEach((idx) => {
-    const p = state.all[idx];
-    cards.push({ key: idx, side: 'a', text: state.direction === 'ab' ? p.a : p.b });
-    cards.push({ key: idx, side: 'b', text: state.direction === 'ab' ? p.b : p.a });
-  });
-  shuffleInPlace(cards, state.seed + state.i);
 
-  root.innerHTML = `<div class="card enter">
-    <div class="term">Найдите пары</div>
-    <div class="match-grid" id="matchGrid"></div>
-    <div class="result" id="result"></div>
-  </div>`;
-  const grid = $('#matchGrid');
-  const result = $('#result');
-  const picked = [];
-  const matchedKeys = new Set();
-
-  function refresh() {
-    grid.innerHTML = '';
-    cards.forEach((c, i) => {
-      const div = document.createElement('button');
-      div.className = 'match-card';
-      div.textContent = c.text;
-      div.disabled = matchedKeys.has(c.key);
-      if (picked.find(p => p.index === i)) div.classList.add('active');
-      if (matchedKeys.has(c.key)) div.classList.add('matched');
-      div.onclick = () => onPick(i);
-      grid.appendChild(div);
-    });
-  }
-
-  function onPick(i) {
-    if (matchedKeys.has(cards[i].key)) return;
-    const already = picked.find(p => p.index === i);
-    if (already) { picked.splice(picked.indexOf(already), 1); refresh(); return; }
-    picked.push({ index: i, card: cards[i] });
-    if (picked.length === 2) {
-      const [p1, p2] = picked;
-      picked.length = 0;
-      if (p1.card.key === p2.card.key && p1.card.side !== p2.card.side) {
-        matchedKeys.add(p1.card.key);
-        markProgress(keyFor(p1.card.key), true);
-        haptic(true);
-        refresh();
-        if (matchedKeys.size === indices.length) {
-          // advance by number of pairs used
-          state.i += round;
-          setTimeout(() => render(), 250);
-        }
-      } else {
-        haptic(false);
-        const nodes = grid.children;
-        nodes[p1.index].classList.add('wrong');
-        nodes[p2.index].classList.add('wrong');
-        setTimeout(() => { nodes[p1.index].classList.remove('wrong'); nodes[p2.index].classList.remove('wrong'); refresh(); }, 300);
-      }
-    } else {
-      refresh();
-    }
-  }
-
-  refresh();
-}
-
-// Blitz mode — rapid know/don't know with a countdown
-let blitzTimer = null;
-function renderBlitz(question, answer, idxKey) {
-  const root = $('#studyApp');
-  if (!state.blitzUntil) {
-    // start a new 60-second blitz window
-    state.blitzUntil = Date.now() + 60000;
-    if (blitzTimer) { clearInterval(blitzTimer); blitzTimer = null; }
-    blitzTimer = setInterval(() => {
-      const t = Math.max(0, state.blitzUntil - Date.now());
-      const s = Math.ceil(t / 1000);
-      const el = $('#blitzTimer');
-      if (el) el.textContent = `${s}s`;
-      if (t <= 0) {
-        clearInterval(blitzTimer); blitzTimer = null; endBlitz();
-      }
-    }, 250);
-  }
-  root.innerHTML = `<div class="card enter">
-    <div class="term">${escapeHtml(question)}</div>
-    <div class="blitz-timer">Таймер: <span id="blitzTimer"></span></div>
-    <div class="actions blitz-actions">
-      <button id="knowBtn" class="primary">Знаю</button>
-      <button id="dontKnowBtn">Не знаю</button>
-    </div>
-  </div>`;
-  const knowBtn = $('#knowBtn');
-  const dontBtn = $('#dontKnowBtn');
-  knowBtn.onclick = () => { haptic(true); markProgress(keyFor(idxKey), true); nextCard(true); };
-  dontBtn.onclick = () => { haptic(false); markProgress(keyFor(idxKey), false); nextCard(false); };
-  root.onkeydown = (e) => {
-    if (e.key === '1' || e.key.toLowerCase() === 'j') knowBtn.click();
-    if (e.key === '2' || e.key.toLowerCase() === 'f') dontBtn.click();
-  };
-  root.tabIndex = 0; root.focus();
-  // update timer immediately
-  const el = $('#blitzTimer'); if (el) { const t = Math.max(0, state.blitzUntil - Date.now()); el.textContent = `${Math.ceil(t/1000)}s`; }
-}
-
-function endBlitz() {
-  const root = $('#studyApp');
-  root.innerHTML = `<div class="card enter">
-    <div class="term">Время вышло ⏱️</div>
-    <div class="answer">Ответов: ${state.answered}, Точность: ${state.answered ? Math.round((state.correct/state.answered)*100) : 0}%</div>
-    <div class="actions"><button id="againBtn" class="primary">Ещё раунд</button><button id="backBtn">К режимам</button></div>
-  </div>`;
-  $('#againBtn').onclick = () => { state.blitzUntil = null; startSession(); };
-  $('#backBtn').onclick = () => { state.blitzUntil = null; exitStudy(); };
-}
 
 
 // Basic swipe/tap helper for touch devices
@@ -636,20 +535,28 @@ function startSession() {
   // Build session indices, possibly filtering learned for flashcards or if 'only unlearned' is checked
   const onlyUnl = document.getElementById('onlyUnlearned')?.checked;
   const includeLearned = document.getElementById('includeLearned')?.checked;
-  const baseIndices = pickSessionIndices(state.all.length, size);
-  let indices = baseIndices;
+
+  // Получаем доступные индексы с учётом системы порций
+  const availableIndices = getAvailableIndices();
+  let pool = availableIndices;
+
+  // Фильтруем выученные, если нужно
   if (((onlyUnl || state.mode === 'flashcards') && !includeLearned) && state.datasetId) {
     const ds = getDatasetStore(state.datasetId).datasets[state.datasetId];
-    indices = baseIndices.filter(i => !ds.learned || !ds.learned[keyFor(i)]);
-    // Fallback: if ничего не осталось (все выучены), запускаем сессию по всем словам
-    if (indices.length === 0) {
+    pool = availableIndices.filter(i => !ds.learned || !ds.learned[keyFor(i)]);
+    // Fallback: if ничего не осталось (все выучены), используем все доступные
+    if (pool.length === 0) {
       const onlyUnlEl = document.getElementById('onlyUnlearned');
       if (onlyUnlEl) onlyUnlEl.checked = false;
       const inclEl = document.getElementById('includeLearned');
       if (inclEl) inclEl.checked = true;
-      indices = baseIndices;
+      pool = availableIndices;
     }
   }
+
+  // Перемешиваем и выбираем нужное количество
+  if (state.shuffleOrder) shuffleInPlace(pool, state.seed);
+  const indices = pool.slice(0, Math.min(size, pool.length));
   state.session = indices;
   state.i = 0;
   state.answered = 0;
@@ -812,6 +719,23 @@ function init() {
   const backModes = document.getElementById('backModes');
   if (backModes) backModes.addEventListener('click', exitStudy);
 
+  // Batch learning controls
+  const toggleBatchMode = document.getElementById('toggleBatchMode');
+  if (toggleBatchMode) {
+    toggleBatchMode.addEventListener('click', () => {
+      state.batchMode = !state.batchMode;
+      toggleBatchMode.textContent = state.batchMode ? 'Отключить порции' : 'Включить порции';
+      updateBatchProgressUI();
+    });
+  }
+  const batchSizeBtns = document.querySelectorAll('.batch-size-btn');
+  batchSizeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.batchSize = Number(btn.dataset.size);
+      updateBatchProgressUI();
+    });
+  });
+
   // Settings sheet
   const openSettings = document.getElementById('openSettings');
   const openSettings2 = document.getElementById('openSettings2');
@@ -894,7 +818,10 @@ function showView(name) {
   }
   if (name === 'modes') {
     adjustSizeRangeToUnlearned();
-    setTimeout(() => updateModeRecommendations(), 100);
+    setTimeout(() => {
+      updateModeRecommendations();
+      updateBatchProgressUI();
+    }, 100);
   }
 }
 
@@ -919,6 +846,172 @@ function getRemainingUnlearnedCount() {
     remaining = state.all.filter((_, i) => !learned.has(keyFor(i))).length;
   }
   return remaining;
+}
+
+// ========== Batch Learning System ==========
+
+// Обновить UI прогресса порций
+function updateBatchProgressUI() {
+  const batchProgress = document.getElementById('batchProgress');
+  if (!batchProgress) return;
+
+  if (!state.batchMode || !state.all.length) {
+    batchProgress.style.display = 'none';
+    return;
+  }
+
+  batchProgress.style.display = 'block';
+
+  const stats = getCurrentBatchStats();
+  const start = stats.current * state.batchSize + 1;
+  const end = Math.min((stats.current + 1) * state.batchSize, state.all.length);
+
+  // Обновляем диапазон текущей порции
+  const batchRange = document.getElementById('batchRange');
+  if (batchRange) batchRange.textContent = `${start}-${end}`;
+
+  // Обновляем прогресс-бар
+  const batchBar = document.getElementById('batchBar');
+  const batchStats = document.getElementById('batchStats');
+  if (batchBar && batchStats) {
+    const progress = stats.total > 0 ? (stats.learned / stats.total) * 100 : 0;
+    batchBar.style.width = `${progress}%`;
+    batchStats.textContent = `${stats.learned}/${stats.total}`;
+  }
+
+  // Показываем информацию о разблокированных порциях
+  const batchUnlocked = document.getElementById('batchUnlocked');
+  const unlockedCount = document.getElementById('unlockedCount');
+  if (batchUnlocked && unlockedCount && stats.unlocked > 1) {
+    batchUnlocked.style.display = 'block';
+    unlockedCount.textContent = stats.unlocked;
+  } else if (batchUnlocked) {
+    batchUnlocked.style.display = 'none';
+  }
+
+  // Показываем информацию о следующей порции
+  const batchLocked = document.getElementById('batchLocked');
+  const nextBatchRange = document.getElementById('nextBatchRange');
+  if (batchLocked && nextBatchRange && stats.unlocked < stats.totalBatches) {
+    batchLocked.style.display = 'block';
+    const nextStart = stats.unlocked * state.batchSize + 1;
+    const nextEnd = Math.min((stats.unlocked + 1) * state.batchSize, state.all.length);
+    nextBatchRange.textContent = `${nextStart}-${nextEnd}`;
+  } else if (batchLocked) {
+    batchLocked.style.display = 'none';
+  }
+
+  // Обновляем выбранный размер порции
+  const sizeButtons = document.querySelectorAll('.batch-size-btn');
+  sizeButtons.forEach(btn => {
+    btn.classList.toggle('selected', Number(btn.dataset.size) === state.batchSize);
+  });
+}
+
+// Получить доступные индексы с учётом режима порций
+function getAvailableIndices() {
+  if (!state.batchMode || !state.datasetId) {
+    return Array.from({ length: state.all.length }, (_, i) => i);
+  }
+
+  const store = getDatasetStore(state.datasetId);
+  const ds = store.datasets[state.datasetId];
+  const unlockedBatches = ds.unlockedBatches || 1;
+  const maxIndex = Math.min(unlockedBatches * state.batchSize, state.all.length);
+
+  return Array.from({ length: maxIndex }, (_, i) => i);
+}
+
+// Получить индексы текущей порции
+function getCurrentBatchIndices() {
+  if (!state.datasetId) return [];
+
+  const store = getDatasetStore(state.datasetId);
+  const ds = store.datasets[state.datasetId];
+  const currentBatch = ds.currentBatch || 0;
+  const start = currentBatch * state.batchSize;
+  const end = Math.min(start + state.batchSize, state.all.length);
+
+  return Array.from({ length: end - start }, (_, i) => start + i);
+}
+
+// Получить статистику по текущей порции
+function getCurrentBatchStats() {
+  if (!state.datasetId || !state.batchMode) {
+    return { total: state.all.length, learned: 0, current: 0, unlocked: 1 };
+  }
+
+  const store = getDatasetStore(state.datasetId);
+  const ds = store.datasets[state.datasetId];
+  const currentBatch = ds.currentBatch || 0;
+  const unlockedBatches = ds.unlockedBatches || 1;
+  const batchIndices = getCurrentBatchIndices();
+
+  const learned = new Set(Object.keys(ds.learned || {}));
+  const learnedInBatch = batchIndices.filter(i => learned.has(keyFor(i))).length;
+
+  return {
+    total: batchIndices.length,
+    learned: learnedInBatch,
+    current: currentBatch,
+    unlocked: unlockedBatches,
+    totalBatches: Math.ceil(state.all.length / state.batchSize),
+  };
+}
+
+// Проверить и разблокировать следующую порцию
+function checkAndUnlockNextBatch() {
+  if (!state.datasetId || !state.batchMode) return false;
+
+  const store = getDatasetStore(state.datasetId);
+  const ds = store.datasets[state.datasetId];
+  const stats = getCurrentBatchStats();
+
+  // Если текущая порция выучена на 80%+ и есть ещё порции
+  const progress = stats.total > 0 ? stats.learned / stats.total : 0;
+  const totalBatches = Math.ceil(state.all.length / state.batchSize);
+
+  if (progress >= 0.8 && ds.unlockedBatches < totalBatches) {
+    ds.unlockedBatches += 1;
+    saveStore(store);
+    return true; // новая порция разблокирована!
+  }
+
+  return false;
+}
+
+// Показать уведомление о разблокировке новой порции
+function showBatchUnlockNotification() {
+  if (!state.batchMode) return;
+
+  const stats = getCurrentBatchStats();
+  const nextStart = (stats.unlocked - 1) * state.batchSize + 1;
+  const nextEnd = Math.min(stats.unlocked * state.batchSize, state.all.length);
+
+  // Создаём временное уведомление
+  const notification = document.createElement('div');
+  notification.className = 'batch-unlock-notification';
+  notification.innerHTML = `
+    <div class="notification-icon">🎉</div>
+    <div class="notification-content">
+      <div class="notification-title">Новая порция разблокирована!</div>
+      <div class="notification-text">Теперь доступны слова ${nextStart}-${nextEnd}</div>
+    </div>
+  `;
+
+  document.body.appendChild(notification);
+
+  // Анимация появления
+  setTimeout(() => notification.classList.add('show'), 10);
+
+  // Автоматически убираем через 4 секунды
+  setTimeout(() => {
+    notification.classList.remove('show');
+    setTimeout(() => notification.remove(), 300);
+  }, 4000);
+
+  // Обновляем UI прогресса
+  setTimeout(() => updateBatchProgressUI(), 100);
 }
 
 // Settings sheet helpers
@@ -1392,129 +1485,7 @@ function setupListeningHandlers(question, answer, idxKey) {
   }
 }
 
-// Режим обратного перевода
-function renderReverse(question, answer, idxKey) {
-  // В обратном режиме меняем местами вопрос и ответ
-  const reverseQuestion = answer;
-  const reverseAnswer = question;
-  
-  const root = $('#studyApp');
-  root.innerHTML = `<div class="card enter">
-    <div class="reverse-indicator">🔄 Обратный перевод</div>
-    <div class="term">${escapeHtml(reverseQuestion)}</div>
-    <div class="hint">Переведите в обратном направлении</div>
-    <input id="reverseInput" class="type" placeholder="Ваш обратный перевод" autocomplete="off" />
-    <div class="result" id="result"></div>
-    <div class="actions">
-      <button id="checkBtn" class="primary">Проверить</button>
-      <button id="skipBtn">Пропустить</button>
-      <button id="nextBtn" style="display:none">Далее</button>
-    </div>
-  </div>`;
-  
-  if (root.firstElementChild) root.firstElementChild.classList.add('enter');
-  const input = $('#reverseInput');
-  const result = $('#result');
-  const checkBtn = $('#checkBtn');
-  const skipBtn = $('#skipBtn');
-  const nextBtn = $('#nextBtn');
 
-  const showNextAndLock = () => {
-    input.disabled = true;
-    checkBtn.disabled = true;
-    skipBtn.disabled = true;
-    nextBtn.style.display = '';
-    nextBtn.focus();
-  };
-
-  const check = () => {
-    const ok = normalize(input.value) === normalize(reverseAnswer);
-    result.textContent = ok ? 'Верно! Обратный перевод правильный!' : `Неверно. Ответ: ${reverseAnswer}`;
-    result.className = 'result ' + (ok ? 'ok' : 'bad');
-    markProgress(keyFor(idxKey), ok);
-    if (ok) {
-      haptic(true);
-      setTimeout(() => nextCard(true), 800);
-    } else {
-      haptic(false);
-      showNextAndLock();
-      nextBtn.onclick = () => nextCard(false);
-    }
-  };
-  
-  checkBtn.onclick = check;
-  skipBtn.onclick = () => {
-    result.textContent = `Ответ: ${reverseAnswer}`;
-    result.className = 'result bad';
-    markProgress(keyFor(idxKey), false);
-    showNextAndLock();
-    nextBtn.onclick = () => nextCard(false);
-  };
-
-  const handleEnter = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (nextBtn.style.display !== 'none') nextBtn.click();
-      else check();
-    }
-  };
-  input.addEventListener('keydown', handleEnter);
-  root.addEventListener('keydown', handleEnter, true);
-  input.focus();
-}
-
-// Смешанный режим (комбинация всех режимов)
-function renderMixed(question, answer, idxKey) {
-  // Инициализируем массив режимов, если его нет
-  if (!state.mixedModes) {
-    state.mixedModes = ['flashcards', 'choice', 'typing', 'matching'];
-    state.currentMixedMode = 0;
-  }
-
-  // Выбираем случайный режим для этого вопроса
-  const availableModes = ['flashcards', 'choice', 'typing'];
-  const randomMode = availableModes[Math.floor(Math.random() * availableModes.length)];
-  
-  const root = $('#studyApp');
-  root.innerHTML = `<div class="mixed-indicator">
-    <div class="mode-badge">🌟 СМЕШАННЫЙ: ${getModeDisplayName(randomMode).toUpperCase()}</div>
-  </div><div id="mixedContent"></div>`;
-  
-  // Временно меняем режим для рендеринга
-  const originalMode = state.mode;
-  state.mode = randomMode;
-  
-  // Создаем временный контейнер для режима
-  const tempRoot = document.createElement('div');
-  tempRoot.id = 'studyApp';
-  document.body.appendChild(tempRoot);
-  
-  // Рендерим выбранный режим
-  if (randomMode === 'flashcards') renderFlashcards(question, answer, idxKey);
-  else if (randomMode === 'choice') renderChoice(question, answer, idxKey);
-  else if (randomMode === 'typing') renderTyping(question, answer, idxKey);
-  
-  // Переносим содержимое в основной контейнер
-  $('#mixedContent').innerHTML = tempRoot.innerHTML;
-  document.body.removeChild(tempRoot);
-  
-  // Восстанавливаем оригинальный режим
-  state.mode = originalMode;
-}
-
-function getModeDisplayName(mode) {
-  const names = {
-    flashcards: 'Карточки',
-    choice: 'Выбор',
-    typing: 'Ввод',
-    matching: 'Сопоставление',
-    blitz: 'Блиц',
-    listening: 'Аудирование',
-    reverse: 'Обратный',
-    mixed: 'Смешанный'
-  };
-  return names[mode] || mode;
-}
 
 // Система аналитики и рекомендаций
 function logModeUsage(mode) {
@@ -1535,29 +1506,26 @@ function getModeRecommendation() {
     const usageKey = 'vocab-crammer:mode-usage';
     const usage = JSON.parse(localStorage.getItem(usageKey) || '{}');
     const sessionCount = usage.sessionCount || 0;
-    
+
     // Для новичков рекомендуем карточки
     if (sessionCount < 3) return 'flashcards';
-    
-    // Для опытных - смешанный режим
-    if (sessionCount > 20) return 'mixed';
-    
+
     // Анализируем точность по режимам
     const store = loadStore();
     if (state.datasetId && store.datasets[state.datasetId]) {
       const stats = store.datasets[state.datasetId].stats;
       const accuracy = stats.answered > 0 ? (stats.correct / stats.answered) : 0;
-      
+
       // Если точность низкая, рекомендуем флэш-карточки
       if (accuracy < 0.6) return 'flashcards';
-      
+
       // Если средняя, рекомендуем выбор
       if (accuracy < 0.8) return 'choice';
-      
+
       // Высокая точность - можно сложные режимы
-      return Math.random() > 0.5 ? 'typing' : 'reverse';
+      return Math.random() > 0.5 ? 'typing' : 'listening';
     }
-    
+
     return 'flashcards';
   } catch (e) {
     return 'flashcards';
