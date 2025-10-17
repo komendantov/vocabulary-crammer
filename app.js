@@ -816,12 +816,31 @@ function updateBatchProgressUI() {
   const batchProgress = document.getElementById('batchProgress');
   if (!batchProgress) return;
 
-  if (!state.batchMode || !state.all.length) {
+  // Показываем блок, если есть данные (чтобы кнопка переключения была видна)
+  if (!state.all.length) {
     batchProgress.style.display = 'none';
     return;
   }
 
   batchProgress.style.display = 'block';
+
+  // Если режим порций выключен, скрываем детали, но оставляем кнопку
+  const batchCurrent = document.getElementById('batchCurrent');
+  const batchUnlocked = document.getElementById('batchUnlocked');
+  const batchLocked = document.getElementById('batchLocked');
+  const batchSizeSelector = document.querySelector('.batch-size-selector');
+
+  if (!state.batchMode) {
+    if (batchCurrent) batchCurrent.style.display = 'none';
+    if (batchUnlocked) batchUnlocked.style.display = 'none';
+    if (batchLocked) batchLocked.style.display = 'none';
+    if (batchSizeSelector) batchSizeSelector.style.display = 'none';
+    return;
+  }
+
+  // Режим порций включен - показываем все детали
+  if (batchCurrent) batchCurrent.style.display = 'block';
+  if (batchSizeSelector) batchSizeSelector.style.display = 'block';
 
   const stats = getCurrentBatchStats();
   const start = stats.current * state.batchSize + 1;
