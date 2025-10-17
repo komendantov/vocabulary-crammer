@@ -514,7 +514,6 @@ function haptic(ok) {
 // Session control
 function startSession() {
   try { ensureDataLoaded(); } catch (e) { setStatus(e.message); return; }
-  const size = Number($('#sizeRange')?.value || 30);
   // Read from tiles if present; fallback to previous state
   const modeTileSel = document.querySelector('#modeTiles .tile.selected')?.dataset.mode;
   const dirTileSel = document.querySelector('#dirTiles .tile.selected')?.dataset.dir;
@@ -554,9 +553,9 @@ function startSession() {
     }
   }
 
-  // Перемешиваем и выбираем нужное количество
+  // Перемешиваем и берём все доступные слова из pool
   if (state.shuffleOrder) shuffleInPlace(pool, state.seed);
-  const indices = pool.slice(0, Math.min(size, pool.length));
+  const indices = pool; // Используем все доступные слова
   state.session = indices;
   state.i = 0;
   state.answered = 0;
@@ -670,39 +669,15 @@ function init() {
   // Modes screen controls
   const backUpload = document.getElementById('backUpload');
   if (backUpload) backUpload.addEventListener('click', () => showView('upload'));
-  const sizeRange = document.getElementById('sizeRange');
-  const sizeVal = document.getElementById('sizeVal');
-  if (sizeRange && sizeVal) { sizeVal.textContent = sizeRange.value; sizeRange.addEventListener('input', () => { sizeVal.textContent = sizeRange.value; }); }
   const startStudy = document.getElementById('startStudy');
   if (startStudy) startStudy.addEventListener('click', startSession);
-  const fillRemaining = document.getElementById('fillRemainingBtn');
   const onlyUnlearned = document.getElementById('onlyUnlearned');
   const includeLearned = document.getElementById('includeLearned');
-  if (fillRemaining) fillRemaining.addEventListener('click', () => {
-    const remaining = getRemainingUnlearnedCount();
-    const sizeRange = document.getElementById('sizeRange');
-    const sizeVal = document.getElementById('sizeVal');
-    if (remaining > 0) {
-      if (sizeRange) { sizeRange.value = String(Math.max(1, remaining)); }
-      if (sizeVal) sizeVal.textContent = String(Math.max(1, remaining));
-      if (onlyUnlearned) onlyUnlearned.checked = true;
-      if (includeLearned) includeLearned.checked = false;
-    } else {
-      // всё выучено — предложим учить все
-      const total = state.all.length;
-      if (sizeRange) { sizeRange.value = String(Math.max(1, total)); }
-      if (sizeVal) sizeVal.textContent = String(Math.max(1, total));
-      if (onlyUnlearned) onlyUnlearned.checked = false;
-      if (includeLearned) includeLearned.checked = true;
-    }
-  });
   if (includeLearned) includeLearned.addEventListener('change', () => {
     if (includeLearned.checked && onlyUnlearned) onlyUnlearned.checked = false;
-    adjustSizeRangeToUnlearned();
   });
   if (onlyUnlearned) onlyUnlearned.addEventListener('change', () => {
     if (onlyUnlearned.checked && includeLearned) includeLearned.checked = false;
-    adjustSizeRangeToUnlearned();
   });
   // Mode tiles
   const modeTiles = document.getElementById('modeTiles');
@@ -817,25 +792,11 @@ function showView(name) {
     setTimeout(() => { oldEl.style.display = 'none'; }, 260);
   }
   if (name === 'modes') {
-    adjustSizeRangeToUnlearned();
     setTimeout(() => {
       updateModeRecommendations();
       updateBatchProgressUI();
     }, 100);
   }
-}
-
-function adjustSizeRangeToUnlearned() {
-  try {
-    const sizeRange = document.getElementById('sizeRange');
-    const sizeVal = document.getElementById('sizeVal');
-    if (!sizeRange) return;
-    const includeLearned = document.getElementById('includeLearned')?.checked;
-    const remaining = includeLearned ? state.all.length : getRemainingUnlearnedCount();
-    sizeRange.max = String(Math.max(1, remaining));
-    if (Number(sizeRange.value) > remaining) sizeRange.value = String(remaining);
-    if (sizeVal) sizeVal.textContent = sizeRange.value;
-  } catch {}
 }
 
 function getRemainingUnlearnedCount() {
