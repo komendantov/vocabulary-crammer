@@ -860,7 +860,6 @@ function updateBatchProgressUI() {
   }
 
   // Показываем информацию о разблокированных порциях
-  const batchUnlocked = document.getElementById('batchUnlocked');
   const unlockedCount = document.getElementById('unlockedCount');
   if (batchUnlocked && unlockedCount && stats.unlocked > 1) {
     batchUnlocked.style.display = 'block';
@@ -870,7 +869,6 @@ function updateBatchProgressUI() {
   }
 
   // Показываем информацию о следующей порции
-  const batchLocked = document.getElementById('batchLocked');
   const nextBatchRange = document.getElementById('nextBatchRange');
   if (batchLocked && nextBatchRange && stats.unlocked < stats.totalBatches) {
     batchLocked.style.display = 'block';
